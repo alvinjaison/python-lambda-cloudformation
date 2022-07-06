@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template for creating containerized Lambda Function to find Reserved instances
+Resources:
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: lambda-role
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+            - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+              - lambda.amazonaws.com
+        Version: 2012-10-17
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
+      Path: /
+  PythonLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: RIFinder
+      Description: Test lambda function
+      MemorySize: 512
+      Handler: index.lambda_handler
+      Runtime: python3.9
+      EphemeralStorage: 
+        Size: 512
+      Timeout: 600
+      Code:
+        ZipFile: |
+          import boto3
+          session = boto3.session.Session()
+          sts = session.client("sts")
+          sp = session.client('savingsplans')
+
+          def lambda_handler(event, context):
+            regions = ["eu-north-1", "ap-south-1", "eu-west-3", "eu-west-2", "eu-west-1", "ap-northeast-3", "ap-northeast-2", "ap-northeast-1", "sa-east-1", "ca-central-1", "ap-southeast-1", "ap-southeast-2", "eu-central-1", "us-east-1", "us-east-2", "us-west-1", "us-west-2"]
+            ec2RIList = []
+            rdsRIList = []
+            redshiftRIList = []
+            ecRIList = []
+            account_id = sts.get_caller_identity()["Account"]
+            response = sp.describe_savings_plans(
+              states=[
+                'active',
+              ]
+            )
+
+            spIDs=[spid['savingsPlanId'] for spid in response['savingsPlans']]
+            for region in regions:
+              ec2 = session.client('ec2', region_name=region)
+              rds = session.client('rds', region_name=region)
+              redshift = session.client('redshift', region_name=region)
+              ec = session.client('elasticache', region_name=region)
+
+              reservedEC2Instances = ec2.describe_reserved_instances(
+                Filters=[
+                  {
+                    'Name': 'state',
+                    'Values': [
+                      'retired',
+                    ]
+                  },
+                ]
+              )
+
+              ec2RId=[ec2ReservedID['ReservedInstancesId'] for ec2ReservedID in reservedEC2Instances['ReservedInstances']]
+              if len(ec2RId):
+                print('Reserved instances found in', region, 'are:', ec2RId)
+                ec2RIList.append(ec2RId)
+        
+              reservedRdsInstances = rds.describe_reserved_db_instances()
+              rdsRId=[rdsReservedID['ReservedDBInstanceId'] for rdsReservedID in reservedRdsInstances['ReservedDBInstances']]
+              if len(rdsRId):
+                print('Reserved RDS instances found in', region, 'are:', rdsRId)
+                rdsRIList.append(rdsRId)
+
+              redshiftReservedNodes = redshift.describe_reserved_nodes()
+              redshiftRId=[redshiftReservedID['ReservedNodeId'] for redshiftReservedID in redshiftReservedNodes['ReservedNodes']]
+              if len(redshiftRId):
+                print('Reserved redshift nodes found in', region, 'are:', redshiftRId)
+                redshiftRIList.append(redshiftRId)
+
+              ecReserved = ec.describe_reserved_cache_nodes()
+              ecRId=[ecReservedID['ReservedCacheNodeId'] for ecReservedID in ecReserved['ReservedCacheNodes']]
+              if len(ecRId):
+                print('Reserved Elastcache nodes found in', region, 'are:', ecRId)
+                ecRIList.append(ecRId)
+            
+            print('----------------------------------------------')
+            if len(spIDs):
+              print('Savings plans found in account are:', spIDs)
+            if len(ec2RIList):
+              print("List of ec2 Reserved instances are:", ec2RIList)
+            if len(rdsRIList):
+              print("List of Reserved RDS instances are:", rdsRIList)
+            if len(redshiftRIList):
+              print("List of Reserved redshift nodes are:", redshiftRIList)
+            if len(ecRIList):
+              print("List of Reserved elasticache node are:", ecRIList)
+            print('----------------------------------------------')
+      
+      Role:
+        Fn::GetAtt:
+          - LambdaRole
+          - Arn
