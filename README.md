@@ -9,4 +9,4 @@ Create the cloudformation stack from AWS console or using aws-cli
    The cloudformation will create the following resources
    > An IAM role
 
-   > A containerized Lambda function with the above created docker image
+   > A Python Lambda function for listing all reserved instances in the account
